@@ -1,0 +1,38 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flask-api-alerts
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: flask-api
+      interval: 30s
+      rules:
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace="production"}[5m]) > 2
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} restarted more than 2 times in the last 5 minutes"
+        
+        - alert: PodNotReady
+          expr: kube_pod_status_ready{namespace="production",condition="false"} == 1
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} is not ready"
+            description: "Pod {{ $labels.pod }} has been in NotReady state for more than 2 minutes"
+        
+        - alert: HighMemoryUsage
+          expr: container_memory_usage_bytes{pod=~"flask-api-.*",namespace="production"} / container_spec_memory_limit_bytes > 0.9
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} memory usage is above 90%"
+            description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of allocated memory"
