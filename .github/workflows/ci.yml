@@ -1,0 +1,81 @@
+name: CI/CD Pipeline
+
+# Runs automatically every time someone pushes to main
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r api/requirements.txt --break-system-packages
+
+      - name: Run tests
+        run: |
+          cd api
+          pytest tests/ -v
+
+  build-and-push:
+    needs: test
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Flask API image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/flask-api:${{ github.sha }}
+
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/worker:${{ github.sha }}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/flask-api \
+            flask-api=${{ secrets.DOCKERHUB_USERNAME }}/flask-api:${{ github.sha }} \
+            -n production
+
+          kubectl set image deployment/worker \
+            worker=${{ secrets.DOCKERHUB_USERNAME }}/worker:${{ github.sha }} \
+            -n production
+
+          kubectl set image deployment/frontend \
+            frontend=${{ secrets.DOCKERHUB_USERNAME }}/frontend:${{ github.sha }} \
+            -n production
+
+          kubectl rollout status deployment/flask-api -n production
+          kubectl rollout status deployment/worker -n production
+          kubectl rollout status deployment/frontend -n production
